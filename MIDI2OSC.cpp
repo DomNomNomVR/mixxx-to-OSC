@@ -1,6 +1,6 @@
-#include <iostream>
 #include "rtmidi.h"
 
+#include <iostream>
 #include <atltrace.h>
 #include <string>
 #include <algorithm>
@@ -8,17 +8,25 @@
 #include <chrono>
 #include <thread>
 
-// extern ATL::CTrace TRACE;
+#include "osc/OscOutboundPacketStream.h"
+#include "ip/UdpSocket.h"
+
+//#include "ip/win32/NetworkingUtils.cpp"
+//#include "ip/win32/UdpSocket.cpp"
+
 #define TRACE ATLTRACE
 
 
 struct MidiProcessor {
 };
+#define OUTPUT_BUFFER_SIZE 1024
 
 void OnMidiIn(double timeStamp, std::vector<unsigned char>* message, void* userData) {
 	std::stringstream debugMessage;
 	std::copy(message->begin(), message->end(), std::ostream_iterator<int>(debugMessage, " "));
-	MidiProcessor* this_ = static_cast<MidiProcessor*>(userData);
+	//osc::OutboundPacketStream *p = static_cast<osc::OutboundPacketStream*>(userData);
+	// 
+	//MidiProcessor* this_ = static_cast<MidiProcessor*>(userData);
 	//IMidiControllerEventReceiver* eventReceiver = this_->eventReceiver;
 	//IMidiControllerEventReceiver* eventReceiver = static_cast<IMidiControllerEventReceiver*> (userData);
 
@@ -26,6 +34,11 @@ void OnMidiIn(double timeStamp, std::vector<unsigned char>* message, void* userD
 		TRACE("Got a message with weird length: %s\n", debugMessage.str().c_str());
 		return;
 	}
+	UdpTransmitSocket* transmitSocket = static_cast<UdpTransmitSocket*>(userData);
+	char buffer[OUTPUT_BUFFER_SIZE];
+	osc::OutboundPacketStream p(buffer, OUTPUT_BUFFER_SIZE);
+
+
 
 	// https://github.com/mixxxdj/mixxx/wiki/MIDI%20clock%20output
 	unsigned char m0 = message->at(0);
@@ -38,26 +51,41 @@ void OnMidiIn(double timeStamp, std::vector<unsigned char>* message, void* userD
 	if (m0 == NOTE_ON && m1 == 52) {
 		int bpm = m2 + 50;
 		TRACE("BPM: %d\n", bpm);
-	//} else if (m0 == 128 && m1 == 48) { 
+		p << osc::BeginBundleImmediate
+			<< osc::BeginMessage("/BPM_int")
+			<< bpm << osc::EndMessage
+			<< osc::EndBundle;
 	}
 	else if (m0 == NOTE_ON && m1 == 48 && m2 == 0) {
 	}
 	else if (m0 == NOTE_ON && m1 == 48 && m2 > 0) {
 		int deck = m2 - 100;
 		TRACE("deck switched to %d\n", deck);
+		p << osc::BeginBundleImmediate
+			<< osc::BeginMessage("/deck_switch")
+			<< deck << osc::EndMessage
+			<< osc::EndBundle;
 	} else if (m0 == NOTE_OFF && m1 == 48) {
 		//TRACE("Deck switch\n");
 	} else {
 		TRACE("Unhandled MIDI message: %s\n", debugMessage.str().c_str());
 	}
 
-
-	
+	if (p.Size() > 0) {
+		transmitSocket->Send(p.Data(), p.Size());
+	}
 }
+
+#define ADDRESS "127.0.0.1"
+#define PORT 8003
 
 
 int main()
 {
+
+	UdpTransmitSocket transmitSocket(IpEndpointName(ADDRESS, PORT));
+
+
 
 	std::unique_ptr<RtMidiOut> midiout;
 	std::unique_ptr<RtMidiIn> midiin;
@@ -72,7 +100,7 @@ int main()
 		TRACE("midiout error: %s", error.getMessage().c_str());
 		return 1;
 	}
-	midiin->setCallback(&OnMidiIn, &midiProcessor);
+	midiin->setCallback(&OnMidiIn, &transmitSocket);
 	// Try find our MidiIn device.
 	unsigned int nPorts = midiin->getPortCount();
 	TRACE("There are %d MIDI input sources available.\n", nPorts);
@@ -134,7 +162,7 @@ int main()
 	TRACE("\n");
 
 	while (1) {
-		std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+		std::this_thread::sleep_for(std::chrono::milliseconds(10));
 	}
 
 	return 0;
