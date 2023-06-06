@@ -1,9 +1,3 @@
-// MIDI2OSC.cpp : This file contains the 'main' function. Program execution begins and ends there.
-//
-#define _WINSOCK_DEPRECATED_NO_WARNINGS
-
-#include "oscpp/client.hpp"
-
 #include <iostream>
 #include "rtmidi.h"
 
@@ -17,82 +11,6 @@
 // extern ATL::CTrace TRACE;
 #define TRACE ATLTRACE
 
-
-size_t makePacket(void* buffer, size_t size) {
-	// Construct a packet
-	OSCPP::Client::Packet packet(buffer, size);
-	packet
-		// Open a bundle with a timetag
-		.openBundle(1234ULL)
-		// Add a message with two arguments and an array with 6 elements;
-		// for efficiency this needs to be known in advance.
-		.openMessage("/s_new", 2 + OSCPP::Tags::array(6))
-		// Write the arguments
-		.string("sinesweep")
-		.int32(2)
-		.openArray()
-		.string("start-freq")
-		.float32(330.0f)
-		.string("end-freq")
-		.float32(990.0f)
-		.string("amp")
-		.float32(0.4f)
-		.closeArray()
-		// Every `open` needs a corresponding `close`
-		.closeMessage()
-		// Add another message with one argument
-		.openMessage("/n_free", 1)
-		.int32(1)
-		.closeMessage()
-		// And nother one
-		.openMessage("/n_set", 3)
-		.int32(1)
-		.string("wobble")
-		// Numeric arguments are converted automatically
-		// (see below)
-		.int32(31)
-		.closeMessage()
-		.closeBundle();
-	return packet.size();
-}
-
-#define _WINSOCK_DEPRECATED_NO_WARNINGS
-#pragma comment (lib, "Ws2_32.lib")
-#include <iostream>
-#include <string.h>
-#include <sstream>
-#include <WinSock2.h>
-#include <WS2tcpip.h>
-using namespace std;
-
-
-int main() {
-	WSAData wsaData;
-	WORD DllVersion = MAKEWORD(2, 1);
-	if (WSAStartup(DllVersion, &wsaData) != 0) {
-		cout << "Winsock Connection Failed!" << endl;
-		exit(1);
-	}
-
-	string getInput = "";
-	SOCKADDR_IN addr;
-	int addrLen = sizeof(addr);
-	IN_ADDR ipvalue;
-	addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-	//addr.sin_addr.s_addr = inet_addr("[::]");
-	addr.sin_port = htons(8004);
-	addr.sin_family = AF_INET;
-
-	SOCKET connection = socket(AF_INET, SOCK_STREAM, NULL);
-	int err;
-	if ((err = connect(connection, (SOCKADDR*)&addr, addrLen)) != 0) {
-		cout << "Error Connecting to Host: " << err << endl;
-		return 1;
-	}
-	TRACE("Connected!\n");
-
-	return 0;
-}
 
 struct MidiProcessor {
 };
@@ -138,7 +56,7 @@ void OnMidiIn(double timeStamp, std::vector<unsigned char>* message, void* userD
 }
 
 
-int main_nope()
+int main()
 {
 
 	std::unique_ptr<RtMidiOut> midiout;
