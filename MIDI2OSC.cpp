@@ -25,18 +25,6 @@
 #define PORT 6969
 #define OUTPUT_BUFFER_SIZE 1024
 
-class UdpTransmitSocketMultiplex {
-public:
-	UdpTransmitSocket a;
-	UdpTransmitSocket b;
-	UdpTransmitSocketMultiplex(UdpTransmitSocket a_, UdpTransmitSocket b_) : a(a_), b(b_) {}
-
-	void Send(const char* data, std::size_t size) {
-		a.Send(data, size);
-		b.Send(data, size);
-	}
-};
-
 
 struct MidiProcessorContext {
 	UdpTransmitSocket* bunSocket;
@@ -60,7 +48,7 @@ void OnMidiIn(double timeStamp, std::vector<unsigned char>* message, void* userD
 	}
 
 	MidiProcessorContext* context = static_cast<MidiProcessorContext*>(userData);
-	UdpTransmitSocket* transmitSocket = context->transmitSocket; //static_cast<UdpTransmitSocket*>(userData);
+	//UdpTransmitSocket* transmitSocket = context->transmitSocket; //static_cast<UdpTransmitSocket*>(userData);
 	char buffer[OUTPUT_BUFFER_SIZE];
 	osc::OutboundPacketStream p(buffer, OUTPUT_BUFFER_SIZE);
 
@@ -97,9 +85,6 @@ void OnMidiIn(double timeStamp, std::vector<unsigned char>* message, void* userD
 	} else if (m0 == NOTE_ON && m1 == 48 && m2 > 0) {
 		int deck = m2 - 100;
 		TRACE("deck switched to %d\n", deck);
-		p << osc::BeginBundleImmediate
-			<< osc::BeginMessage("/active_deck")
-			<< deck << osc::EndMessage;
 		if (deck != context->current_deck) {
 			p << osc::BeginMessage("/deck_pulse")
 				<< 1 << osc::EndMessage;
@@ -107,6 +92,9 @@ void OnMidiIn(double timeStamp, std::vector<unsigned char>* message, void* userD
 				<< 0 << osc::EndMessage;
 			context->current_deck = deck;
 		}
+		p << osc::BeginBundleImmediate
+			<< osc::BeginMessage("/active_deck")
+			<< deck << osc::EndMessage;
 
 		p << osc::EndBundle;
 	} else if (m0 == NOTE_OFF && m1 == 48) {
@@ -116,8 +104,8 @@ void OnMidiIn(double timeStamp, std::vector<unsigned char>* message, void* userD
 	}
 
 	if (p.Size() > 0) {
-		bunSocket->Send(p.Data(), p.Size());
-		domSocket->Send(p.Data(), p.Size());
+		context->bunSocket->Send(p.Data(), p.Size());
+		context->domSocket->Send(p.Data(), p.Size());
 	}
 }
 
@@ -132,7 +120,7 @@ int main()
 	std::unique_ptr<RtMidiOut> midiout;
 	std::unique_ptr<RtMidiIn> midiin;
 
-	MidiProcessorContext context{&bunSocket, &domSocket 0, -1};
+	MidiProcessorContext context{&bunSocket, &domSocket, 0, -1};
 
 	// RtMidiIn constructor
 	try {
