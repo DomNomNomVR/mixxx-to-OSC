@@ -16,10 +16,34 @@
 
 #define TRACE ATLTRACE
 
+//#define ADDRESS "localhost"
+#define ADDRESS_LOCALHOST "127.0.0.1"
+//#define ADDRESS "2601:647:ce00:bce:a9cd:29d4:5e05:a276"
+//#define ADDRESS 
+#define ADDRESS_BUN "174.160.84.25"
 
-struct MidiProcessor {
-};
+#define PORT 6969
 #define OUTPUT_BUFFER_SIZE 1024
+
+class UdpTransmitSocketMultiplex {
+public:
+	UdpTransmitSocket a;
+	UdpTransmitSocket b;
+	UdpTransmitSocketMultiplex(UdpTransmitSocket a_, UdpTransmitSocket b_) : a(a_), b(b_) {}
+
+	void Send(const char* data, std::size_t size) {
+		a.Send(data, size);
+		b.Send(data, size);
+	}
+};
+
+
+struct MidiProcessorContext {
+	UdpTransmitSocket* bunSocket;
+	UdpTransmitSocket* domSocket;
+	int toggle_each_measure;
+	int current_deck;
+};
 
 void OnMidiIn(double timeStamp, std::vector<unsigned char>* message, void* userData) {
 	std::stringstream debugMessage;
@@ -34,7 +58,9 @@ void OnMidiIn(double timeStamp, std::vector<unsigned char>* message, void* userD
 		TRACE("Got a message with weird length: %s\n", debugMessage.str().c_str());
 		return;
 	}
-	UdpTransmitSocket* transmitSocket = static_cast<UdpTransmitSocket*>(userData);
+
+	MidiProcessorContext* context = static_cast<MidiProcessorContext*>(userData);
+	UdpTransmitSocket* transmitSocket = context->transmitSocket; //static_cast<UdpTransmitSocket*>(userData);
 	char buffer[OUTPUT_BUFFER_SIZE];
 	osc::OutboundPacketStream p(buffer, OUTPUT_BUFFER_SIZE);
 
@@ -57,14 +83,32 @@ void OnMidiIn(double timeStamp, std::vector<unsigned char>* message, void* userD
 			<< osc::EndBundle;
 	}
 	else if (m0 == NOTE_ON && m1 == 48 && m2 == 0) {
-	}
-	else if (m0 == NOTE_ON && m1 == 48 && m2 > 0) {
+	} else if (m0 == NOTE_ON && m1 == 50 && m2 == 100) {
+		TRACE("beat\n");
+		context->toggle_each_measure = 1 - context->toggle_each_measure;
+		p << osc::BeginBundleImmediate
+			<< osc::BeginMessage("/toggle_each_measure")
+			<< context->toggle_each_measure
+			<< osc::EndMessage
+			<< osc::EndBundle;
+
+	} else if (m0 == NOTE_ON && m1 == 50 && m2 == 0) {
+	} else if (m0 == NOTE_OFF && m1 == 50) {
+	} else if (m0 == NOTE_ON && m1 == 48 && m2 > 0) {
 		int deck = m2 - 100;
 		TRACE("deck switched to %d\n", deck);
 		p << osc::BeginBundleImmediate
-			<< osc::BeginMessage("/deck_switch")
-			<< deck << osc::EndMessage
-			<< osc::EndBundle;
+			<< osc::BeginMessage("/active_deck")
+			<< deck << osc::EndMessage;
+		if (deck != context->current_deck) {
+			p << osc::BeginMessage("/deck_pulse")
+				<< 1 << osc::EndMessage;
+			p << osc::BeginMessage("/deck_pulse")
+				<< 0 << osc::EndMessage;
+			context->current_deck = deck;
+		}
+
+		p << osc::EndBundle;
 	} else if (m0 == NOTE_OFF && m1 == 48) {
 		//TRACE("Deck switch\n");
 	} else {
@@ -72,25 +116,23 @@ void OnMidiIn(double timeStamp, std::vector<unsigned char>* message, void* userD
 	}
 
 	if (p.Size() > 0) {
-		transmitSocket->Send(p.Data(), p.Size());
+		bunSocket->Send(p.Data(), p.Size());
+		domSocket->Send(p.Data(), p.Size());
 	}
 }
 
-#define ADDRESS "127.0.0.1"
-#define PORT 8003
 
 
 int main()
 {
 
-	UdpTransmitSocket transmitSocket(IpEndpointName(ADDRESS, PORT));
-
-
+	UdpTransmitSocket bunSocket(IpEndpointName(ADDRESS_BUN, PORT));
+	UdpTransmitSocket domSocket(IpEndpointName(ADDRESS_LOCALHOST, PORT));
 
 	std::unique_ptr<RtMidiOut> midiout;
 	std::unique_ptr<RtMidiIn> midiin;
 
-	MidiProcessor midiProcessor;
+	MidiProcessorContext context{&bunSocket, &domSocket 0, -1};
 
 	// RtMidiIn constructor
 	try {
@@ -100,7 +142,7 @@ int main()
 		TRACE("midiout error: %s", error.getMessage().c_str());
 		return 1;
 	}
-	midiin->setCallback(&OnMidiIn, &transmitSocket);
+	midiin->setCallback(&OnMidiIn, &context);
 	// Try find our MidiIn device.
 	unsigned int nPorts = midiin->getPortCount();
 	TRACE("There are %d MIDI input sources available.\n", nPorts);
@@ -163,6 +205,16 @@ int main()
 
 	while (1) {
 		std::this_thread::sleep_for(std::chrono::milliseconds(10));
+		/*
+		char buffer[OUTPUT_BUFFER_SIZE];
+		osc::OutboundPacketStream p(buffer, OUTPUT_BUFFER_SIZE);
+		p << osc::BeginBundleImmediate
+			<< osc::BeginMessage("/test")
+			<< osc::EndMessage
+			<< osc::EndBundle;
+		transmitSocket.Send(p.Data(), p.Size());
+		std::cout << "sending /test\n";
+		*/
 	}
 
 	return 0;
